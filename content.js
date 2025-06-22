@@ -17,19 +17,19 @@ if (document.readyState === 'loading') {
 
 function initializeSmallTalkPro() {
   console.log('SmallTalkPro initializing...');
-  
+
   // Detect platform (Teams or Google Meet)
   const platform = detectPlatform();
   if (!platform) {
     console.log('Not on a supported platform');
     return;
   }
-  
+
   console.log(`Detected platform: ${platform}`);
-  
+
   // Set up observers for meeting detection
   setupMeetingDetection(platform);
-  
+
   // Create small talk panel
   createSmallTalkPanel();
 }
@@ -55,22 +55,20 @@ function setupMeetingDetection(platform) {
 
 function setupTeamsMeetingDetection() {
   // Monitor for Teams meeting UI elements
-  const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      // Look for meeting controls or participant list
-      const meetingControls = document.querySelector('[data-tid="meeting-controls"]');
-      const participantList = document.querySelector('[data-tid="roster-list"]');
-      
-      if (meetingControls && !currentMeetingId) {
-        // Meeting started
-        handleMeetingStart('teams');
-      } else if (!meetingControls && currentMeetingId) {
-        // Meeting ended
-        handleMeetingEnd();
-      }
-    });
+  const observer = new MutationObserver(() => {
+    // Detect participant roster in Teams
+    const meetingControls = document.querySelector('[data-tid="call-controls"]');
+    const participantNodes = document.querySelectorAll('[data-tid="roster-item"]');
+
+    if ((meetingControls || participantNodes.length > 0) && !currentMeetingId) {
+      // Meeting started
+      handleMeetingStart('teams');
+    } else if (!meetingControls && participantNodes.length === 0 && currentMeetingId) {
+      // Meeting ended
+      handleMeetingEnd();
+    }
   });
-  
+
   observer.observe(document.body, {
     childList: true,
     subtree: true
@@ -78,23 +76,21 @@ function setupTeamsMeetingDetection() {
 }
 
 function setupGoogleMeetDetection() {
-  // Monitor for Google Meet UI elements
-  const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      // Look for meeting controls or participant list
-      const meetingControls = document.querySelector('[data-call-controls]');
-      const participantList = document.querySelector('[data-participant-id]');
-      
-      if (meetingControls && !currentMeetingId) {
-        // Meeting started
-        handleMeetingStart('googlemeet');
-      } else if (!meetingControls && currentMeetingId) {
-        // Meeting ended
-        handleMeetingEnd();
-      }
-    });
+  // Monitor for Google Meet meeting controls and participant list
+  const observer = new MutationObserver(() => {
+    // Use new, correct selector for controls
+    const meetingControls = document.querySelector('.Tmb7Fd[aria-label="Call controls"]');
+    const participantNodes = document.querySelectorAll('[data-participant-id]');
+
+    if ((meetingControls || participantNodes.length > 0) && !currentMeetingId) {
+      // Meeting started
+      handleMeetingStart('googlemeet');
+    } else if (!meetingControls && participantNodes.length === 0 && currentMeetingId) {
+      // Meeting ended
+      handleMeetingEnd();
+    }
   });
-  
+
   observer.observe(document.body, {
     childList: true,
     subtree: true
@@ -103,13 +99,13 @@ function setupGoogleMeetDetection() {
 
 function handleMeetingStart(platform) {
   console.log('Meeting started on', platform);
-  
+
   // Generate meeting ID
   currentMeetingId = generateMeetingId();
-  
+
   // Extract participants
   participants = extractParticipants(platform);
-  
+
   // Notify background script
   chrome.runtime.sendMessage({
     action: 'startMeeting',
@@ -119,9 +115,9 @@ function handleMeetingStart(platform) {
       participants: participants
     }
   }, (response) => {
-    if (response.error) {
+    if (response && response.error) {
       console.error('Error starting meeting:', response.error);
-    } else {
+    } else if (response) {
       displaySmallTalk(response.smallTalk);
     }
   });
@@ -129,7 +125,7 @@ function handleMeetingStart(platform) {
 
 function handleMeetingEnd() {
   console.log('Meeting ended');
-  
+
   // Notify background script
   chrome.runtime.sendMessage({
     action: 'endMeeting',
@@ -137,11 +133,11 @@ function handleMeetingEnd() {
       meetingId: currentMeetingId
     }
   }, (response) => {
-    if (response.error) {
+    if (response && response.error) {
       console.error('Error ending meeting:', response.error);
     }
   });
-  
+
   // Reset state
   currentMeetingId = null;
   participants = [];
@@ -150,7 +146,7 @@ function handleMeetingEnd() {
 
 function extractParticipants(platform) {
   const participants = [];
-  
+
   if (platform === 'teams') {
     // Extract participants from Teams UI
     const participantElements = document.querySelectorAll('[data-tid="roster-item"]');
@@ -167,8 +163,9 @@ function extractParticipants(platform) {
     // Extract participants from Google Meet UI
     const participantElements = document.querySelectorAll('[data-participant-id]');
     participantElements.forEach((element) => {
-      const nameElement = element.querySelector('[data-self-name], [data-participant-name]');
-      if (nameElement) {
+      // Google Meet: get name from .zWGUib inside the node
+      const nameElement = element.querySelector('.zWGUib');
+      if (nameElement && nameElement.textContent.trim()) {
         participants.push({
           name: nameElement.textContent.trim(),
           platform: 'googlemeet'
@@ -176,17 +173,17 @@ function extractParticipants(platform) {
       }
     });
   }
-  
+
   return participants;
 }
 
 function createSmallTalkPanel() {
   if (smallTalkPanel) return;
-  
+
   smallTalkPanel = document.createElement('div');
   smallTalkPanel.id = 'smalltalk-panel';
   smallTalkPanel.className = 'smalltalk-panel hidden';
-  
+
   smallTalkPanel.innerHTML = `
     <div class="smalltalk-header">
       <div class="smalltalk-logo">
@@ -202,22 +199,22 @@ function createSmallTalkPanel() {
       <div class="smalltalk-snippets"></div>
     </div>
   `;
-  
+
   document.body.appendChild(smallTalkPanel);
 }
 
 function displaySmallTalk(smallTalkData) {
   if (!smallTalkPanel) return;
-  
+
   const snippetsContainer = smallTalkPanel.querySelector('.smalltalk-snippets');
   const loadingElement = smallTalkPanel.querySelector('.smalltalk-loading');
-  
+
   // Hide loading
   loadingElement.style.display = 'none';
-  
+
   // Clear previous snippets
   snippetsContainer.innerHTML = '';
-  
+
   if (!smallTalkData || smallTalkData.length === 0) {
     snippetsContainer.innerHTML = '<div class="no-snippets">No previous conversations found.</div>';
   } else {
@@ -232,7 +229,7 @@ function displaySmallTalk(smallTalkData) {
       snippetsContainer.appendChild(snippetElement);
     });
   }
-  
+
   // Show panel
   smallTalkPanel.classList.remove('hidden');
 }
@@ -267,7 +264,7 @@ function showConsentDialog(participants, sendResponse) {
   // Create consent dialog
   consentDialog = document.createElement('div');
   consentDialog.className = 'consent-dialog-overlay';
-  
+
   consentDialog.innerHTML = `
     <div class="consent-dialog">
       <div class="consent-header">
@@ -284,16 +281,16 @@ function showConsentDialog(participants, sendResponse) {
       </div>
     </div>
   `;
-  
+
   document.body.appendChild(consentDialog);
-  
+
   // Handle consent response
   consentDialog.querySelector('.consent-allow').addEventListener('click', () => {
     document.body.removeChild(consentDialog);
     consentDialog = null;
     sendResponse({ granted: true });
   });
-  
+
   consentDialog.querySelector('.consent-deny').addEventListener('click', () => {
     document.body.removeChild(consentDialog);
     consentDialog = null;
@@ -303,7 +300,7 @@ function showConsentDialog(participants, sendResponse) {
 
 function addNewSmallTalkSnippet(snippetData) {
   if (!smallTalkPanel) return;
-  
+
   const snippetsContainer = smallTalkPanel.querySelector('.smalltalk-snippets');
   const snippetElement = document.createElement('div');
   snippetElement.className = 'smalltalk-snippet new-snippet';
@@ -312,12 +309,11 @@ function addNewSmallTalkSnippet(snippetData) {
     <div class="snippet-text">${snippetData.text}</div>
     <div class="snippet-timestamp">Just now</div>
   `;
-  
+
   snippetsContainer.insertBefore(snippetElement, snippetsContainer.firstChild);
-  
+
   // Remove 'new' class after animation
   setTimeout(() => {
     snippetElement.classList.remove('new-snippet');
   }, 2000);
 }
-

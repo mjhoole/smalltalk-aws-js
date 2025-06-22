@@ -1,7 +1,7 @@
 // background.js - Service Worker for Chrome Extension
 
 const API_BASE_URL = 'https://7m0j2avi6j.execute-api.ap-southeast-2.amazonaws.com'; // Replace with actual API Gateway URL
-const WS_URL = 'wss://vbx2hmj6r3.execute-api.ap-southeast-2.amazonaws.com'; // Replace with actual WebSocket URL
+const WS_URL = 'wss://vbx2hmj6r3.execute-api.ap-southeast-2.amazonaws.com/$default/'; // Replace with actual WebSocket URL
 
 let websocket = null;
 let isRecording = false;

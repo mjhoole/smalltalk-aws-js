@@ -254,6 +254,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       addNewSmallTalkSnippet(request.data);
       sendResponse({ success: true });
       break;
+    case 'startPageRecording':
+      startPageRecording(request.meetingId);
+      sendResponse({ success: true });
+      break;
+    case 'stopPageRecording':
+      stopPageRecording();
+      sendResponse({ success: true });
+      break;
 
     default:
       sendResponse({ error: 'Unknown action' });
@@ -318,5 +326,77 @@ function addNewSmallTalkSnippet(snippetData) {
     snippetElement.classList.remove('new-snippet');
   }, 2000);
 }
+
+// Inject recording script into page
+function startPageRecording(meetingId) {
+  const script = document.createElement('script');
+  script.textContent = `
+    (function() {
+      let mediaRecorder, audioStream;
+      
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          audioStream = stream;
+          mediaRecorder = new MediaRecorder(stream);
+          
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              const reader = new FileReader();
+              reader.onload = () => {
+                window.postMessage({
+                  type: 'AUDIO_DATA',
+                  audioData: reader.result,
+                  meetingId: '${meetingId}'
+                }, '*');
+              };
+              reader.readAsArrayBuffer(event.data);
+            }
+          };
+          
+          mediaRecorder.start(1000);
+          console.log('Page recording started');
+        })
+        .catch(error => {
+          console.error('Recording error:', error);
+          window.postMessage({ type: 'RECORDING_ERROR', error: error.message }, '*');
+        });
+        
+      window.stopRecording = function() {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+        if (audioStream) {
+          audioStream.getTracks().forEach(track => track.stop());
+        }
+      };
+    })();
+  `;
+  document.head.appendChild(script);
+  document.head.removeChild(script);
+}
+
+function stopPageRecording() {
+  const script = document.createElement('script');
+  script.textContent = 'if (window.stopRecording) window.stopRecording();';
+  document.head.appendChild(script);
+  document.head.removeChild(script);
+}
+
+// Listen for messages from injected script
+window.addEventListener('message', (event) => {
+  if (event.source !== window) return;
+  
+  if (event.data.type === 'AUDIO_DATA') {
+    chrome.runtime.sendMessage({
+      action: 'audioData',
+      data: {
+        audioData: event.data.audioData,
+        meetingId: event.data.meetingId
+      }
+    });
+  } else if (event.data.type === 'RECORDING_ERROR') {
+    console.error('Recording error:', event.data.error);
+  }
+});
 
 

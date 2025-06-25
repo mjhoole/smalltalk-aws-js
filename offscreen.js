@@ -13,8 +13,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function startRecording(meetingId) {
   try {
-    audioStream = await navigator.mediaDevices.getDisplayMedia({
-      video: false,
+    audioStream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
@@ -43,7 +42,11 @@ async function startRecording(meetingId) {
     mediaRecorder.start(1000);
     console.log('Recording started');
   } catch (error) {
-    console.error('Recording error:', error);
+    console.error('Recording error:', error.name, error.message);
+    chrome.runtime.sendMessage({
+      action: 'recordingError',
+      error: error.message
+    });
   }
 }
 

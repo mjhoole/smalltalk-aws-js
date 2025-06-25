@@ -31,6 +31,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       handleRecordingData(request.data.audioData, request.data.meetingId);
       sendResponse({ success: true });
       break;
+    case 'recordingError':
+      console.error('Recording error from offscreen:', request.error);
+      sendResponse({ success: false });
+      break;
 
     default:
       sendResponse({ error: 'Unknown action' });
@@ -62,8 +66,15 @@ async function handleStartMeeting(data, sendResponse) {
       return;
     }
 
-    // Start recording using offscreen API
-    await startOffscreenRecording(data.meetingId);
+    // Start recording via content script injection
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'startPageRecording',
+          meetingId: data.meetingId
+        });
+      }
+    });
     
     // Get relevant small talk for participants
     const smallTalk = await getRelevantSmallTalk(data.participants);
@@ -192,31 +203,18 @@ function handleRecordingData(audioData, meetingId) {
   }
 }
 
-// Start offscreen recording
-async function startOffscreenRecording(meetingId) {
-  try {
-    await chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: ['USER_MEDIA'],
-      justification: 'Recording audio for meeting transcription'
-    });
-    
-    chrome.runtime.sendMessage({
-      action: 'startRecording',
-      meetingId: meetingId
-    });
-    
-    isRecording = true;
-  } catch (error) {
-    console.error('Error starting offscreen recording:', error);
-  }
-}
+
 
 // Stop audio recording
 async function stopRecording() {
   if (isRecording) {
-    chrome.runtime.sendMessage({ action: 'stopRecording' });
-    await chrome.offscreen.closeDocument();
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'stopPageRecording'
+        });
+      }
+    });
     isRecording = false;
   }
 }

@@ -19,7 +19,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["styles.css"],
+      "resources": ["styles.css", "offscreen.html"],
       "matches": ["https://teams.microsoft.com/*", "https://meet.google.com/*"]
     }
   ],

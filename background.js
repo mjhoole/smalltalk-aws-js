@@ -27,13 +27,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'requestConsent':
       handleRequestConsent(request.data, sendResponse);
       break;
-    case 'recordingData':
+    case 'audioData':
       handleRecordingData(request.data.audioData, request.data.meetingId);
       sendResponse({ success: true });
       break;
-    case 'startTabCapture':
-      handleStartTabCapture(request.data, sendResponse);
-      break;
+
     default:
       sendResponse({ error: 'Unknown action' });
   }
@@ -64,15 +62,8 @@ async function handleStartMeeting(data, sendResponse) {
       return;
     }
 
-    // Request content script to start recording
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'startRecording',
-          meetingId: data.meetingId
-        });
-      }
-    });
+    // Start recording using offscreen API
+    await startOffscreenRecording(data.meetingId);
     
     // Get relevant small talk for participants
     const smallTalk = await getRelevantSmallTalk(data.participants);
@@ -187,59 +178,7 @@ async function requestUserConsent(participants) {
   });
 }
 
-// Handle tab capture start
-async function handleStartTabCapture(data, sendResponse) {
-  try {
-    // Use chrome.tabCapture to get audio stream
-    chrome.tabCapture.capture({ audio: true }, (stream) => {
-      if (chrome.runtime.lastError) {
-        console.error('Tab capture error:', chrome.runtime.lastError);
-        sendResponse({ error: chrome.runtime.lastError.message });
-        return;
-      }
-      
-      if (stream) {
-        startRecordingWithStream(stream, data.meetingId);
-        sendResponse({ success: true });
-      } else {
-        sendResponse({ error: 'Failed to capture tab audio' });
-      }
-    });
-  } catch (error) {
-    console.error('Error starting tab capture:', error);
-    sendResponse({ error: error.message });
-  }
-}
 
-// Start recording with captured stream
-function startRecordingWithStream(stream, meetingId) {
-  try {
-    const mediaRecorder = new MediaRecorder(stream);
-    
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        // Convert audio data and send to WebSocket
-        const reader = new FileReader();
-        reader.onload = () => {
-          handleRecordingData(reader.result, meetingId);
-        };
-        reader.readAsArrayBuffer(event.data);
-      }
-    };
-    
-    mediaRecorder.onerror = (error) => {
-      console.error('MediaRecorder error:', error);
-    };
-    
-    mediaRecorder.start(1000); // Capture audio in 1-second chunks
-    isRecording = true;
-    
-    console.log('Tab audio recording started');
-    
-  } catch (error) {
-    console.error('Error starting recording with stream:', error);
-  }
-}
 
 // Handle recording data from content script
 function handleRecordingData(audioData, meetingId) {
@@ -253,17 +192,33 @@ function handleRecordingData(audioData, meetingId) {
   }
 }
 
+// Start offscreen recording
+async function startOffscreenRecording(meetingId) {
+  try {
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: ['USER_MEDIA'],
+      justification: 'Recording audio for meeting transcription'
+    });
+    
+    chrome.runtime.sendMessage({
+      action: 'startRecording',
+      meetingId: meetingId
+    });
+    
+    isRecording = true;
+  } catch (error) {
+    console.error('Error starting offscreen recording:', error);
+  }
+}
+
 // Stop audio recording
 async function stopRecording() {
-  isRecording = false;
-  // Request content script to stop recording
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (tabs[0]) {
-      chrome.tabs.sendMessage(tabs[0].id, {
-        action: 'stopRecording'
-      });
-    }
-  });
+  if (isRecording) {
+    chrome.runtime.sendMessage({ action: 'stopRecording' });
+    await chrome.offscreen.closeDocument();
+    isRecording = false;
+  }
 }
 
 // Get relevant small talk for meeting participants

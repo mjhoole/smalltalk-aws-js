@@ -4,8 +4,6 @@ let smallTalkPanel = null;
 let consentDialog = null;
 let currentMeetingId = null;
 let participants = [];
-let mediaRecorder = null;
-let audioStream = null;
 
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', initializeSmallTalkPro);
@@ -256,12 +254,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       addNewSmallTalkSnippet(request.data);
       sendResponse({ success: true });
       break;
-    case 'startRecording':
-      startRecording(request.meetingId, sendResponse);
-      break;
-    case 'stopRecording':
-      stopRecording(sendResponse);
-      break;
+
     default:
       sendResponse({ error: 'Unknown action' });
   }
@@ -326,42 +319,4 @@ function addNewSmallTalkSnippet(snippetData) {
   }, 2000);
 }
 
-// Start audio recording - delegate to background script
-function startRecording(meetingId, sendResponse) {
-  // Request background script to start tab capture
-  chrome.runtime.sendMessage({
-    action: 'startTabCapture',
-    data: { meetingId: meetingId }
-  }, (response) => {
-    if (sendResponse) {
-      sendResponse(response);
-    }
-  });
-}
 
-// Stop audio recording
-function stopRecording(sendResponse) {
-  try {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop();
-    }
-    
-    if (audioStream) {
-      audioStream.getTracks().forEach(track => track.stop());
-      audioStream = null;
-    }
-    
-    mediaRecorder = null;
-    console.log('Recording stopped');
-    
-    if (sendResponse) {
-      sendResponse({ success: true });
-    }
-    
-  } catch (error) {
-    console.error('Error stopping recording:', error);
-    if (sendResponse) {
-      sendResponse({ error: error.message });
-    }
-  }
-}

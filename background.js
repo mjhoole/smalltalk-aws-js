@@ -5,6 +5,7 @@ const WS_URL = 'wss://vbx2hmj6r3.execute-api.ap-southeast-2.amazonaws.com/$defau
 
 let websocket = null;
 let isRecording = false;
+let isConnecting = false;
 
 // Initialize extension
 chrome.runtime.onInstalled.addListener(() => {
@@ -26,6 +27,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'requestConsent':
       handleRequestConsent(request.data, sendResponse);
       break;
+    case 'recordingData':
+      handleRecordingData(request.data.audioData, request.data.meetingId);
+      sendResponse({ success: true });
+      break;
+    case 'startTabCapture':
+      handleStartTabCapture(request.data, sendResponse);
+      break;
     default:
       sendResponse({ error: 'Unknown action' });
   }
@@ -35,8 +43,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 // Handle meeting start
 async function handleStartMeeting(data, sendResponse) {
   try {
-    // Connect to WebSocket
-    await connectWebSocket();
+    // Connect to WebSocket if not already connected
+    if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+      if (!isConnecting) {
+        isConnecting = true;
+        await connectWebSocket();
+        isConnecting = false;
+      } else {
+        // Wait for existing connection attempt
+        while (isConnecting) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+    }
     
     // Get user consent
     const consentGranted = await requestUserConsent(data.participants);
@@ -45,8 +64,15 @@ async function handleStartMeeting(data, sendResponse) {
       return;
     }
 
-    // Start recording and transcription
-    await startRecording(data.meetingId);
+    // Request content script to start recording
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'startRecording',
+          meetingId: data.meetingId
+        });
+      }
+    });
     
     // Get relevant small talk for participants
     const smallTalk = await getRelevantSmallTalk(data.participants);
@@ -76,13 +102,19 @@ async function handleEndMeeting(data, sendResponse) {
   }
 }
 
-// Connect to WebSocket for real-time communication
-function connectWebSocket() {
+// Connect to WebSocket for real-time communication with retry logic
+function connectWebSocket(retryCount = 0, maxRetries = 3) {
   return new Promise((resolve, reject) => {
+    if (retryCount > maxRetries) {
+      reject(new Error('Max WebSocket connection retries exceeded'));
+      return;
+    }
+
     websocket = new WebSocket(WS_URL);
     
     websocket.onopen = () => {
       console.log('WebSocket connected');
+      isConnecting = false;
       resolve();
     };
     
@@ -93,11 +125,25 @@ function connectWebSocket() {
     
     websocket.onerror = (error) => {
       console.error('WebSocket error:', error);
-      reject(error);
     };
     
-    websocket.onclose = () => {
-      console.log('WebSocket disconnected');
+    websocket.onclose = (event) => {
+      console.log('WebSocket disconnected:', event.code, event.reason);
+      
+      // Handle rate limiting (429) or other connection issues
+      if (event.code === 1006 || event.code === 1011) {
+        const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+        console.log(`Retrying WebSocket connection in ${delay}ms (attempt ${retryCount + 1}/${maxRetries + 1})`);
+        
+        setTimeout(() => {
+          connectWebSocket(retryCount + 1, maxRetries)
+            .then(resolve)
+            .catch(reject);
+        }, delay);
+      } else {
+        isConnecting = false;
+        reject(new Error(`WebSocket connection failed: ${event.code} ${event.reason}`));
+      }
     };
   });
 }
@@ -141,46 +187,83 @@ async function requestUserConsent(participants) {
   });
 }
 
-// Start audio recording and transcription
-async function startRecording(meetingId) {
+// Handle tab capture start
+async function handleStartTabCapture(data, sendResponse) {
   try {
-    // Get microphone access
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    
-    // Set up MediaRecorder for audio capture
+    // Use chrome.tabCapture to get audio stream
+    chrome.tabCapture.capture({ audio: true }, (stream) => {
+      if (chrome.runtime.lastError) {
+        console.error('Tab capture error:', chrome.runtime.lastError);
+        sendResponse({ error: chrome.runtime.lastError.message });
+        return;
+      }
+      
+      if (stream) {
+        startRecordingWithStream(stream, data.meetingId);
+        sendResponse({ success: true });
+      } else {
+        sendResponse({ error: 'Failed to capture tab audio' });
+      }
+    });
+  } catch (error) {
+    console.error('Error starting tab capture:', error);
+    sendResponse({ error: error.message });
+  }
+}
+
+// Start recording with captured stream
+function startRecordingWithStream(stream, meetingId) {
+  try {
     const mediaRecorder = new MediaRecorder(stream);
-    const audioChunks = [];
     
     mediaRecorder.ondataavailable = (event) => {
-      audioChunks.push(event.data);
-      
-      // Send audio chunk to backend via WebSocket
-      if (websocket && websocket.readyState === WebSocket.OPEN) {
+      if (event.data.size > 0) {
+        // Convert audio data and send to WebSocket
         const reader = new FileReader();
         reader.onload = () => {
-          websocket.send(JSON.stringify({
-            action: 'ingestAudio',
-            meetingId: meetingId,
-            audioData: reader.result
-          }));
+          handleRecordingData(reader.result, meetingId);
         };
         reader.readAsArrayBuffer(event.data);
       }
     };
     
+    mediaRecorder.onerror = (error) => {
+      console.error('MediaRecorder error:', error);
+    };
+    
     mediaRecorder.start(1000); // Capture audio in 1-second chunks
     isRecording = true;
     
+    console.log('Tab audio recording started');
+    
   } catch (error) {
-    console.error('Error starting recording:', error);
-    throw error;
+    console.error('Error starting recording with stream:', error);
+  }
+}
+
+// Handle recording data from content script
+function handleRecordingData(audioData, meetingId) {
+  // Send audio chunk to backend via WebSocket
+  if (websocket && websocket.readyState === WebSocket.OPEN) {
+    websocket.send(JSON.stringify({
+      action: 'ingestAudio',
+      meetingId: meetingId,
+      audioData: audioData
+    }));
   }
 }
 
 // Stop audio recording
 async function stopRecording() {
   isRecording = false;
-  // Additional cleanup logic here
+  // Request content script to stop recording
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    if (tabs[0]) {
+      chrome.tabs.sendMessage(tabs[0].id, {
+        action: 'stopRecording'
+      });
+    }
+  });
 }
 
 // Get relevant small talk for meeting participants

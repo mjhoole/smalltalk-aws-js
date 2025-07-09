@@ -330,56 +330,16 @@ function addNewSmallTalkSnippet(snippetData) {
 // Inject recording script into page
 function startPageRecording(meetingId) {
   const script = document.createElement('script');
-  script.textContent = `
-    (function() {
-      let mediaRecorder, audioStream;
-      
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-          audioStream = stream;
-          mediaRecorder = new MediaRecorder(stream);
-          
-          mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-              const reader = new FileReader();
-              reader.onload = () => {
-                window.postMessage({
-                  type: 'AUDIO_DATA',
-                  audioData: reader.result,
-                  meetingId: '${meetingId}'
-                }, '*');
-              };
-              reader.readAsArrayBuffer(event.data);
-            }
-          };
-          
-          mediaRecorder.start(1000);
-          console.log('Page recording started');
-        })
-        .catch(error => {
-          console.error('Recording error:', error);
-          window.postMessage({ type: 'RECORDING_ERROR', error: error.message }, '*');
-        });
-        
-      window.stopRecording = function() {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-          mediaRecorder.stop();
-        }
-        if (audioStream) {
-          audioStream.getTracks().forEach(track => track.stop());
-        }
-      };
-    })();
-  `;
+  script.src = chrome.runtime.getURL('inject-recorder.js');
+  script.onload = () => {
+    window.postMessage({ type: 'START_RECORDING', meetingId: meetingId }, '*');
+    document.head.removeChild(script);
+  };
   document.head.appendChild(script);
-  document.head.removeChild(script);
 }
 
 function stopPageRecording() {
-  const script = document.createElement('script');
-  script.textContent = 'if (window.stopRecording) window.stopRecording();';
-  document.head.appendChild(script);
-  document.head.removeChild(script);
+  window.postMessage({ type: 'STOP_RECORDING' }, '*');
 }
 
 // Listen for messages from injected script

@@ -222,12 +222,9 @@ async function stopRecording() {
 // Get relevant small talk for meeting participants
 async function getRelevantSmallTalk(participants) {
   try {
-    const response = await fetch(`${API_BASE_URL}/smalltalk/relevant`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ participants })
+    const participantNames = participants.map(p => p.name || p).join(',');
+    const response = await fetch(`${API_BASE_URL}/smalltalk/relevant?participants=${encodeURIComponent(participantNames)}`, {
+      method: 'GET'
     });
     
     if (!response.ok) {

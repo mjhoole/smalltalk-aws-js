@@ -88,6 +88,15 @@ function setupGoogleMeetDetection() {
     } else if (!meetingControls && participantNodes.length === 0 && currentMeetingId) {
       // Meeting ended
       handleMeetingEnd();
+    } else if (currentMeetingId) {
+      // Meeting ongoing - check for participant changes
+      const newParticipants = extractParticipants('googlemeet');
+      if (newParticipants.length !== participants.length || 
+          !newParticipants.every(p => participants.some(existing => existing.name === p.name))) {
+        console.log('Participants changed:', newParticipants);
+        participants = newParticipants;
+        updateSmallTalk();
+      }
     }
   });
 
@@ -145,7 +154,7 @@ function handleMeetingEnd() {
 }
 
 function extractParticipants(platform) {
-  const participants = [];
+  const participantList = [];
 
   if (platform === 'teams') {
     // Extract participants from Teams UI
@@ -153,28 +162,127 @@ function extractParticipants(platform) {
     participantElements.forEach((element) => {
       const nameElement = element.querySelector('[data-tid="roster-item-name"]');
       if (nameElement) {
-        participants.push({
+        participantList.push({
           name: nameElement.textContent.trim(),
           platform: 'teams'
         });
       }
     });
   } else if (platform === 'googlemeet') {
-    // Extract participants from Google Meet UI
+    console.log('Extracting Google Meet participants...');
+    
+    // Get participant elements
     const participantElements = document.querySelectorAll('[data-participant-id]');
-    participantElements.forEach((element) => {
-      // Google Meet: get name from .zWGUib inside the node
-      const nameElement = element.querySelector('.zWGUib');
-      if (nameElement && nameElement.textContent.trim()) {
-        participants.push({
-          name: nameElement.textContent.trim(),
+    console.log('Found participant elements:', participantElements.length);
+    
+    participantElements.forEach(element => {
+      // Look for name in aria-label first (most reliable)
+      const ariaLabel = element.getAttribute('aria-label');
+      console.log('Found aria-label:', ariaLabel);
+      
+      let cleanName = null;
+      
+      if (ariaLabel) {
+        cleanName = extractNameFromAriaLabel(ariaLabel);
+        console.log('Cleaned name from aria-label:', cleanName);
+      }
+      
+      // Fallback to text content if aria-label doesn't work
+      if (!cleanName) {
+        const textContent = element.textContent;
+        console.log('Trying text content:', textContent);
+        cleanName = extractNameFromText(textContent);
+        console.log('Cleaned name from text:', cleanName);
+      }
+      
+      // Filter out current user (you) and add valid participants
+      if (cleanName && 
+          cleanName !== 'You' && 
+          !cleanName.includes('Michael Hoole') && // Replace with your actual name
+          !participantList.some(p => p.name === cleanName)) {
+        participantList.push({
+          name: cleanName,
           platform: 'googlemeet'
         });
+        console.log('Added participant:', cleanName);
+      } else {
+        console.log('Filtered out participant:', cleanName);
       }
     });
   }
 
-  return participants;
+  console.log('Final extracted participants:', participantList);
+  return participantList;
+}
+
+function extractNameFromAriaLabel(ariaLabel) {
+  if (!ariaLabel || ariaLabel.length === 0) return null;
+  
+  let name = ariaLabel;
+  name = name.replace(/\s*\([^)]*@[^)]*\)\s*/g, '').trim();
+  
+  const parts = name.split(/[\n\r\t,;]/);
+  if (parts.length > 0) {
+    name = parts[0].trim();
+  }
+  
+  if (name.length >= 2 && name.length <= 30 && /^[a-zA-Z][a-zA-Z\s.'\-]*$/.test(name)) {
+    return name;
+  }
+  
+  return null;
+}
+
+function extractNameFromText(textContent) {
+  if (!textContent) return null;
+  
+  console.log('Processing text content:', textContent);
+  
+  // Look for name patterns in the text
+  // Common pattern: "KellyKellydevices" or "Michael HooleMichael Hooledevices"
+  
+  // Remove common UI suffixes
+  let cleanText = textContent.replace(/devices?$/i, '').trim();
+  
+  // Look for repeated name patterns like "KellyKelly" -> "Kelly"
+  const nameMatch = cleanText.match(/^([A-Z][a-z]+)\1/); // Matches "KellyKelly"
+  if (nameMatch) {
+    const name = nameMatch[1];
+    console.log('Found repeated name pattern:', name);
+    return name;
+  }
+  
+  // Look for "FirstName LastNameFirstName LastName" pattern
+  const fullNameMatch = cleanText.match(/^([A-Z][a-z]+ [A-Z][a-z]+)\1/); // Matches "Michael HooleMichael Hoole"
+  if (fullNameMatch) {
+    const name = fullNameMatch[1];
+    console.log('Found repeated full name pattern:', name);
+    return name;
+  }
+  
+  // Fallback: look for any name-like text at the start
+  const simpleNameMatch = cleanText.match(/^([A-Z][a-zA-Z\s.'\-]{1,29})/);
+  if (simpleNameMatch) {
+    let name = simpleNameMatch[1].trim();
+    
+    // Remove duplicate consecutive words
+    const words = name.split(/\s+/);
+    const uniqueWords = [];
+    let lastWord = '';
+    
+    for (const word of words) {
+      if (word.toLowerCase() !== lastWord.toLowerCase()) {
+        uniqueWords.push(word);
+        lastWord = word;
+      }
+    }
+    
+    name = uniqueWords.join(' ');
+    console.log('Found simple name:', name);
+    return name;
+  }
+  
+  return null;
 }
 
 function createSmallTalkPanel() {
@@ -242,6 +350,21 @@ function hideSmallTalkPanel() {
 
 function generateMeetingId() {
   return 'meeting_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+}
+
+function updateSmallTalk() {
+  if (!currentMeetingId || participants.length === 0) return;
+  
+  chrome.runtime.sendMessage({
+    action: 'getSmallTalk',
+    data: {
+      participants: participants
+    }
+  }, (response) => {
+    if (response && response.smallTalk) {
+      displaySmallTalk(response.smallTalk);
+    }
+  });
 }
 
 // Listen for messages from background script

@@ -24,6 +24,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'getSmallTalk':
       handleGetSmallTalk(request.data, sendResponse);
       break;
+    case 'saveSmallTalk':
+      handleSaveSmallTalk(request.data, sendResponse);
+      break;
     case 'requestConsent':
       handleRequestConsent(request.data, sendResponse);
       break;
@@ -242,6 +245,46 @@ async function getRelevantSmallTalk(participants) {
         suggestion: 'Ask about recent hiking trips or favorite trails'
       }
     ];
+  }
+}
+
+// Handle get small talk request
+async function handleGetSmallTalk(data, sendResponse) {
+  try {
+    const smallTalk = await getRelevantSmallTalk(data.participants);
+    sendResponse({ 
+      success: true, 
+      smallTalk: smallTalk 
+    });
+  } catch (error) {
+    console.error('Error getting small talk:', error);
+    sendResponse({ error: error.message });
+  }
+}
+
+// Handle save small talk request
+async function handleSaveSmallTalk(data, sendResponse) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/smalltalk/save`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(data)
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to save small talk');
+    }
+    
+    const result = await response.json();
+    sendResponse({ 
+      success: true, 
+      result: result 
+    });
+  } catch (error) {
+    console.error('Error saving small talk:', error);
+    sendResponse({ error: error.message });
   }
 }
 

@@ -225,8 +225,7 @@ async function getRelevantSmallTalk(participants) {
     const response = await fetch(`${API_BASE_URL}/smalltalk/relevant`, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${await getAuthToken()}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({ participants })
     });

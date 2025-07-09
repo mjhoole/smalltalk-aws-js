@@ -347,13 +347,22 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) return;
   
   if (event.data.type === 'AUDIO_DATA') {
-    chrome.runtime.sendMessage({
-      action: 'audioData',
-      data: {
-        audioData: event.data.audioData,
-        meetingId: event.data.meetingId
+    try {
+      chrome.runtime.sendMessage({
+        action: 'audioData',
+        data: {
+          audioData: event.data.audioData,
+          meetingId: event.data.meetingId
+        }
+      });
+    } catch (error) {
+      if (error.message.includes('Extension context invalidated')) {
+        console.log('Extension context invalidated, stopping audio recording');
+        stopPageRecording();
+      } else {
+        console.error('Error sending audio data:', error);
       }
-    });
+    }
   } else if (event.data.type === 'RECORDING_ERROR') {
     console.error('Recording error:', event.data.error);
   }

@@ -228,7 +228,6 @@ async function getRelevantSmallTalk(participants) {
     });
     
     if (!response.ok) {
-      console.error('API response not ok:', response.status, response.statusText);
       throw new Error('Failed to fetch small talk');
     }
     

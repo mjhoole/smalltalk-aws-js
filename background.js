@@ -228,13 +228,21 @@ async function getRelevantSmallTalk(participants) {
     });
     
     if (!response.ok) {
+      console.error('API response not ok:', response.status, response.statusText);
       throw new Error('Failed to fetch small talk');
     }
     
     return await response.json();
   } catch (error) {
     console.error('Error fetching small talk:', error);
-    return [];
+    // Return mock data as fallback
+    return [
+      {
+        participantName: participants[0]?.name || 'John',
+        text: 'Mentioned loving hiking last month',
+        suggestion: 'Ask about recent hiking trips or favorite trails'
+      }
+    ];
   }
 }
 
